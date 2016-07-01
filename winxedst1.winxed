@@ -3970,6 +3970,16 @@ class ComparatorBaseExpr : OpBinaryExpr
             e.emitset(aux, regr);
             regr = aux;
             break;
+          case rr == REGfloat && rl == REGvar:
+            aux = self.tempreg(REGfloat);
+            e.emitset( aux, regl);
+            regl = aux;
+            break;
+          case rr == REGvar && rl == REGfloat:
+            aux = self.tempreg(REGfloat);
+            e.emitset(aux, regr);
+            regr = aux;
+            break;
           case rr == REGstring && rl == REGvar:
             aux = self.tempreg(REGstring);
             e.emitset(aux, regl);
@@ -7763,13 +7773,12 @@ class ConstStatement : Statement
     var data;
     var value;
 
-    function ConstStatement(var name, var owner,
-            string type, var value)
+    function ConstStatement(var name, var tk, var owner, string type)
     {
         self.Statement(name, owner);
         self.type = type;
         self.name = name;
-        self.value = value;
+        self.value = parseExpr(tk, self);
         self.data = self.createconst(name, type);
     }
     function optimize()
@@ -7813,9 +7822,7 @@ function parseConst(var start, var tk, var owner)
         var name = tk.get();
         RequireIdentifier(name);
         ExpectOp("=", tk);
-        var value = parseExpr(tk, owner);
-        multi = addtomulti(multi,
-                new ConstStatement(name, owner, type, value));
+        multi = addtomulti(multi, new ConstStatement(name, tk, owner, type));
     } while ((t = tk.get()).isop(","));
     RequireOp(";", t);
     return multi;
@@ -9938,11 +9945,10 @@ function main [main](var args)
     string srcname = src;
 
     var handlein;
-    if (evalexpr == null) {
-        handlein = new ["FileHandle"];
-        handlein.open(srcname, "r");
-    }
-    else {
+    if (evalexpr == null)
+        handlein = open(srcname, "r");
+    else
+    {
         evalexpr = "function main[main](var argv){" + evalexpr + ";}";
         handlein = new ["StringHandle"];
         handlein.open(srcname, "w");
@@ -9961,10 +9967,8 @@ function main [main](var args)
     var output;
     if (objname == "-")
         output = getstdout();
-    else {
-        output = new ["FileHandle"];
-        output.open(objname, "w");
-    }
+    else
+        output = open(objname, "w");
     var emit = new Emit(output, nowarn);
     winxed.emit(emit);
     emit.close();

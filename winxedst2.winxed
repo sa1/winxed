@@ -4961,6 +4961,16 @@ class ComparatorBaseExpr : OpBinaryExpr, ConditionFriendlyExpr
             e.emitset(aux, regr);
             regr = aux;
             break;
+          case rr == REGfloat && rl == REGvar:
+            aux = self.tempreg(REGfloat);
+            e.emitset( aux, regl);
+            regl = aux;
+            break;
+          case rr == REGvar && rl == REGfloat:
+            aux = self.tempreg(REGfloat);
+            e.emitset(aux, regr);
+            regr = aux;
+            break;
           case rr == REGstring && rl == REGvar:
             aux = self.tempreg(REGstring);
             e.emitset(aux, regl);
@@ -8587,31 +8597,11 @@ class InlineReturnStatement : Statement
         var outer = self.owner.getouter();
         __ASSERT__(outer instanceof InlinedBlock);
         var expr = self.expr;
-        string rettype = outer.getrettype();
-        self.annotate(e);
-        if (expr != null) {
-            var retreg = outer.getretreg();
-            if (retreg == null)
-                expr.emit_void(e);
-            else {
-                if (expr.isnull())
-                    e.emitnull(retreg);
-                else {
-                    string type = expr.checkresult();
-                    if (type == rettype)
-                        expr.emit(e, retreg);
-                    else {
-                        string reg = expr.emit_get(e);
-                        self.annotate(e);
-                        if (rettype == REGvar)
-                            e.emitbox(retreg, reg);
-                        else
-                            e.emitset(retreg, reg);
-                    }
-                }
-            }
+        if (expr != null)
+        {
+            self.annotate(e);
+            outer.emitret(e, expr);
         }
-
         if (! outer.islaststatement(self)) {
             string retlabel = outer.getendlabel();
             self.annotate(e);
@@ -10217,13 +10207,12 @@ class ConstStatement : Statement
     var data;
     var value;
 
-    function ConstStatement(var name, var owner,
-            string type, var value)
+    function ConstStatement(var name, var tk, var owner, string type)
     {
         self.Statement(name, owner);
         self.type = type;
         self.name = name;
-        self.value = value;
+        self.value = parseExpr(tk, self);
         self.data = self.createconst(name, type);
     }
     function optimize()
@@ -10283,9 +10272,7 @@ function parseConst(var start, var tk, var owner)
         var name = tk.get();
         RequireIdentifier(name);
         ExpectOp("=", tk);
-        var value = parseExpr(tk, owner);
-        multi = addtomulti(multi,
-                new ConstStatement(name, owner, type, value));
+        multi = addtomulti(multi, new ConstStatement(name, tk, owner, type));
     } while ((t = tk.get()).isop(","));
     RequireOp(";", t);
     return multi;
@@ -11657,7 +11644,10 @@ class InlinedBlock : BlockStatement
 
     function getendlabel()
     {
-        return self.endlabel;
+        var endlabel = self.endlabel;
+        if (endlabel == null)
+           self.endlabel = endlabel = self.genlabel();
+        return string(endlabel);
     }
     function getrettype()
     {
@@ -11671,11 +11661,36 @@ class InlinedBlock : BlockStatement
     {
         return self.retreg;
     }
+    function emitret(var e, var expr)
+    {
+        string rettype = self.getrettype();
+        if (expr != null) {
+            var retreg = self.getretreg();
+            if (retreg == null)
+                expr.emit_void(e);
+            else {
+                if (expr.isnull())
+                    e.emitnull(retreg);
+                else {
+                    string type = expr.checkresult();
+                    if (type == rettype)
+                        expr.emit(e, retreg);
+                    else {
+                        string reg = expr.emit_get(e);
+                        self.annotate(e);
+                        if (rettype == REGvar)
+                            e.emitbox(retreg, reg);
+                        else
+                            e.emitset(retreg, reg);
+                    }
+                }
+            }
+        }
+    }
     function emit_it(var e)
     {
         if (e.getDebug())
             e.comment("inlined start");
-        self.endlabel = self.genlabel();
         var params = self.params;
         var args = self.args;
         int nparams = params == null ? 0 : elements(params);
@@ -11699,7 +11714,9 @@ class InlinedBlock : BlockStatement
         }
         e.print(join("", transform(self.usedsubids, [], emit_subid)));
         self.body.emit(e);
-        e.emitlabel(self.endlabel);
+        var endlabel = self.endlabel;
+        if (endlabel != null)
+            e.emitlabel(endlabel);
     }
     function emit(var e, string result)
     {
@@ -12826,13 +12843,15 @@ class NamespaceBase : VarContainer
         t = tk.get();
 
         var parent = self;
-        for ( ; t.isop("."); t = tk.get()) {
+        for ( ; t.isop("."); t = tk.get())
+        {
             parent = parent.childnamespace(start, name, null);
             name = tk.get();
         }
 
         var modifier;
-        if (t.isop("[")) {
+        if (t.isop("["))
+        {
             modifier = new ModifierList(tk, self);
             t = tk.get();
         }
@@ -13397,8 +13416,7 @@ class WinxedHLL
         // output is supposed to be used with pir target for a now,.
         if (target == null)
             target = "";
-        var handlein = new ["FileHandle"];
-        handlein.open(filename, "r");
+        var handlein = open(filename, "r");
         handlein.encoding("utf8");
         :Tokenizer tk(handlein, filename, nowarn);
         :WinxedCompileUnit winxed(filename, nowarn, debug);
